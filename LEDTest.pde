@@ -34,14 +34,111 @@
 import ddf.minim.*;
 import ddf.minim.analysis.*;
 
+import controlP5.*;
+
 Minim minim;
 AudioInput in;
 color white;
 FFT fft;
+ControlP5 cp5;
+
+public class SineDrawable implements CDrawable {
+  
+  public void draw(PGraphics p) {
+    p.pushMatrix();
+    
+    p.translate(0, 0);
+    
+     // draw the waveforms
+    for(int i = 0; i < in.bufferSize() - 1; i++)
+    {
+      stroke((1+in.left.get(i))*50,100,100);
+      line(i, 50 + in.left.get(i)*50, i+1, 50 + in.left.get(i+1)*50);
+      stroke(white);
+      line(i, 150 + in.right.get(i)*50, i+1, 150 + in.right.get(i+1)*50);
+    }
+    
+    p.popMatrix();
+  }
+}
+
+public class FFTDrawable implements CDrawable {
+  
+  public void draw(PGraphics p) {
+    p.pushMatrix();
+    
+    p.translate(0, 215);
+    
+    noStroke();
+  
+    float centerFrequency = 0;
+    float spectrumScale = 4;
+    
+    // draw the logarithmic averages
+    {
+      // since logarithmically spaced averages are not equally spaced
+      // we can't precompute the width for all averages
+      for(int i = 0; i < fft.avgSize(); i++)
+      {
+        centerFrequency    = fft.getAverageCenterFrequency(i);
+        // how wide is this average in Hz?
+        float averageWidth = fft.getAverageBandWidth(i);   
+        
+        // we calculate the lowest and highest frequencies
+        // contained in this average using the center frequency
+        // and bandwidth of this average.
+        float lowFreq  = centerFrequency - averageWidth/2;
+        float highFreq = centerFrequency + averageWidth/2;
+        
+        // freqToIndex converts a frequency in Hz to a spectrum band index
+        // that can be passed to getBand. in this case, we simply use the 
+        // index as coordinates for the rectangle we draw to represent
+        // the average.
+        int xl = (int) (i * (width * 1.0 / fft.avgSize()));
+        int xr = (int) ((i + 1) * (width * 1.0 / fft.avgSize()));
+        
+        // if the mouse is inside of this average's rectangle
+        // print the center frequency and set the fill color to red
+        if ( mouseX >= xl && mouseX < xr )
+        {
+          fill(255, 128);
+          text("Logarithmic Average Center Frequency: " + centerFrequency, 5, 200 - 25);
+          fill(255, 0, 0);
+        }
+        else
+        {
+            fill(255);
+        }
+        // draw a rectangle for each average, multiply the value by spectrumScale so we can see it better
+        rect(xl, 180, xr - xl, 180 - fft.getAvg(i)*spectrumScale );
+      }
+    }
+    
+    p.popMatrix();
+  }
+}
 
 void setup()
 {
-  size(512, 200, P2D);
+  size(512, 400, P2D);
+  
+  cp5 = new ControlP5(this);
+  cp5.setAutoDraw(false);
+  
+  cp5.addGroup("Audio Signal")
+    .setPosition(0, 15)
+    .setSize(511, 180)
+    .setLabel("Audio Signal")
+    .disableCollapse()
+    .addDrawable(new SineDrawable());
+  
+  cp5.addGroup("FFT")
+    .setPosition(0, 215)
+    .setSize(511, 180)
+    .setLabel("FFT")
+    .disableCollapse()
+    .addDrawable(new FFTDrawable());
+ 
   white = color(255);
   minim = new Minim(this);
   minim.debugOn();
@@ -57,72 +154,19 @@ void setup()
 void draw()
 {
   background(0);
-  // draw the waveforms
-  //for(int i = 0; i < in.bufferSize() - 1; i++)
-  //{
-  //  stroke((1+in.left.get(i))*50,100,100);
-  //  line(i, 50 + in.left.get(i)*50, i+1, 50 + in.left.get(i+1)*50);
-  //  stroke(white);
-  //  line(i, 150 + in.right.get(i)*50, i+1, 150 + in.right.get(i+1)*50);
-  //}
+  
+  fft.forward(in.mix);
+  cp5.draw();
   
   //stroke(255);
   // draw the waveforms
-  fft.forward( in.mix );
   
   //for(int i = 0; i < fft.specSize(); i++)
   //{
   //  // draw the line for frequency band i, scaling it up a bit so we can see it
   //  line( i, height, i, height - fft.getBand(i)*8 );
   //}
-  
-  // no more outline, we'll be doing filled rectangles from now
-  noStroke();
-  
-  float centerFrequency = 0;
-  float spectrumScale = 4;
-  
-  // draw the logarithmic averages
-  {
-    // since logarithmically spaced averages are not equally spaced
-    // we can't precompute the width for all averages
-    for(int i = 0; i < fft.avgSize(); i++)
-    {
-      centerFrequency    = fft.getAverageCenterFrequency(i);
-      // how wide is this average in Hz?
-      float averageWidth = fft.getAverageBandWidth(i);   
-      
-      // we calculate the lowest and highest frequencies
-      // contained in this average using the center frequency
-      // and bandwidth of this average.
-      float lowFreq  = centerFrequency - averageWidth/2;
-      float highFreq = centerFrequency + averageWidth/2;
-      
-      // freqToIndex converts a frequency in Hz to a spectrum band index
-      // that can be passed to getBand. in this case, we simply use the 
-      // index as coordinates for the rectangle we draw to represent
-      // the average.
-      int xl = (int) (i * (width * 1.0 / fft.avgSize()));
-      int xr = (int) ((i + 1) * (width * 1.0 / fft.avgSize()));
-      
-      // if the mouse is inside of this average's rectangle
-      // print the center frequency and set the fill color to red
-      if ( mouseX >= xl && mouseX < xr )
-      {
-        fill(255, 128);
-        text("Logarithmic Average Center Frequency: " + centerFrequency, 5, height - 25);
-        fill(255, 0, 0);
-      }
-      else
-      {
-          fill(255);
-      }
-      // draw a rectangle for each average, multiply the value by spectrumScale so we can see it better
-      rect(xl, height, xr - xl, height - fft.getAvg(i)*spectrumScale );
-    }
-  }
 }
-
 
 void stop()
 {
