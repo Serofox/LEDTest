@@ -43,6 +43,12 @@ ControlP5 cp5;
 
 SignalFrame signalFrame;
 RawFFTFrame rawFFTFrame;
+HistographFrame histographFrame;
+
+long frameTimeNs;
+long frameTimeCheckpointNs = -1;
+int numFramesCheckpoint = -1;
+float currentFrameRate = Float.NaN;
 
 void setup()
 {
@@ -62,6 +68,7 @@ void setup()
   
   signalFrame = new SignalFrame(this, 512, 200, "Audio Signal");
   rawFFTFrame = new RawFFTFrame(this, 512, 200, "Raw FFT");
+  histographFrame = new HistographFrame(this, 512, 200, "Histograph");
 }
 
 void settings() {
@@ -70,6 +77,17 @@ void settings() {
 
 void draw()
 {
+  frameTimeNs = System.nanoTime();
+  
+  if (frameTimeNs - frameTimeCheckpointNs > 500000000) {
+    int numFrames = frameCount;
+    if (frameTimeCheckpointNs != -1) {
+      currentFrameRate = (numFrames - numFramesCheckpoint) * 1.0 / (frameTimeNs - frameTimeCheckpointNs) * 1e9;
+    }
+    frameTimeCheckpointNs = frameTimeNs;
+    numFramesCheckpoint = numFrames;
+  }
+  
   background(0);
   
   fft.forward(in.mix);
@@ -130,20 +148,20 @@ void stop()
 }
 
 public class AbstractFrame extends PApplet {
-  int w, h;
+  int width, height;
   PApplet parent;
   ControlP5 cp5;
 
   public AbstractFrame(PApplet _parent, int _w, int _h, String _name) {
     super();   
     parent = _parent;
-    w=_w;
-    h=_h;
+    width=_w;
+    height=_h;
     PApplet.runSketch(new String[]{this.getClass().getName()}, this);
   }
   
   public void settings() {
-    size(w, h);
+    size(width, height);
   }
 }
 
@@ -182,5 +200,63 @@ public class SignalFrame extends AbstractFrame {
       stroke(color(255, 255, 255));
       line(i, 150 + in.right.get(i)*50, i+1, 150 + in.right.get(i+1)*50);
     }
+    
+    // NaN check
+    if (currentFrameRate == currentFrameRate) {
+      fill(200, 70, 70);
+      text("" + nf(currentFrameRate, 2, 1) + " FPS", 5, 25);
+    }
+  }
+}
+  
+public class HistographFrame extends AbstractFrame {
+
+  float[] volume;
+  int currentIndex = 0;
+  float scale = 1;
+  
+  public HistographFrame(PApplet _parent, int _w, int _h, String _name) {
+    super(_parent, _w, _h, _name);
+    
+    volume = new float[_w];
+  }
+  
+  public void draw() {
+    background(0);
+    
+    if (currentIndex == volume.length) {
+      reset();
+    }
+    
+    volume[currentIndex] = getVolume();
+    if (scale * volume[currentIndex] > height - 20) {
+      scale = (height - 20) / volume[currentIndex];
+    }
+
+    for(int i = 0; i < volume.length - 1; i++)
+    {
+      if (i >= currentIndex) {
+        break;
+      }
+      stroke(((int) (volume[i] * scale)) % 256, 100, 100);
+      line(i, height - (volume[i] * scale) - 10, i + 1, height - (volume[i + 1] * scale) - 10);
+    }
+    
+    currentIndex++;
+  }
+  
+  void reset() {
+    for (int i = 0; i < volume.length; i++) {
+      volume[i] = 0;
+    }
+    currentIndex = 0;
+  }
+  
+  float getVolume() {
+    float sum = 0;
+    for (int i = 0; i < fft.avgSize(); i++) {
+      sum += fft.getAvg(i);
+    }
+    return sum;
   }
 }
