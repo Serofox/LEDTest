@@ -49,6 +49,7 @@ long frameTimeNs;
 long frameTimeCheckpointNs = -1;
 int numFramesCheckpoint = -1;
 float currentFrameRate = Float.NaN;
+float minStdDev = 3;
 
 float freqFilterLog = log(40000);
 
@@ -351,11 +352,7 @@ public class HistographCanvas extends Canvas {
   public void draw() {
     background(0);
     
-    if (inPeak[(currentIndex - 1 + inPeak.length) % inPeak.length]) {
-      stroke(250, 100, 100);
-    } else {
-      stroke(50, 25 * endFFTIndex, 25 * endFFTIndex);
-    }
+    stroke(10 * endFFTIndex, 50 + 25 * endFFTIndex, 25 * endFFTIndex);
     rect(0, 0, width, height);
     noFill();
     
@@ -376,6 +373,7 @@ public class HistographCanvas extends Canvas {
       avg = avg(rollingVolume, 0, ticks);
       std = std(rollingVolume, 0, ticks);
     }
+    canDetectPeaks = canDetectPeaks && std >= minStdDev;
     
     avgOverTime[currentIndex] = avg;
     stdOverTime[currentIndex] = std;
@@ -385,16 +383,10 @@ public class HistographCanvas extends Canvas {
       scale = (height - 20) / currentVolume;
     }
 
-    if (canDetectPeaks) {
-      inPeak[currentIndex] = currentVolume >= avg + std;
-    }
+    inPeak[currentIndex] = canDetectPeaks && currentVolume >= avg + std;
 
-    for(int i = 0; i < volume.length - 1; i++)
-    {
-      if (i >= currentIndex) {
-        break;
-      }
-      
+    for(int i = 0; i < volume.length - 1 && i < currentIndex; i++)
+    { 
       //
       // Draw Volume
       //
@@ -410,15 +402,30 @@ public class HistographCanvas extends Canvas {
       line(i, getYCoord(avgOverTime[i]), i + 1, getYCoord(avgOverTime[i + 1]));
       stroke(100, 200, 100);
       line(i, getYCoord(stdOverTime[i] + avgOverTime[i]), i + 1, getYCoord(stdOverTime[i + 1] + avgOverTime[i + 1]));
-      
-      //
-      // Draw beats
-      //
-      
-      if (inPeak[i]) {
-        stroke(250, 50, 50);
-        line(i, height - 10, i, height - 6);
+    }
+    
+    //
+    // Draw beats
+    //
+    
+    stroke(250, 50, 50);
+    fill(250, 50, 50);
+    
+    int peakStart = -1;
+    for(int i = 0; i < volume.length - 1 && i < currentIndex; i++) {
+      if (peakStart == -1) {
+        if (inPeak[i]) {
+          peakStart = i;
+        }
+      } else {
+        if (!inPeak[i]) {
+          rect(peakStart, height - 10, i - peakStart - 1, 4);
+          peakStart = -1;
+        }
       }
+    }
+    if (peakStart != -1) {
+      rect(peakStart, height - 10, currentIndex - peakStart - 1, 4);
     }
     
     currentIndex++;
