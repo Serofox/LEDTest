@@ -33,7 +33,8 @@
 
 import ddf.minim.*; 
 import ddf.minim.analysis.*; 
-import controlP5.*; 
+import controlP5.*;
+import java.util.Arrays;
 
 Minim minim;
 AudioInput in;
@@ -319,11 +320,72 @@ public class CanvasFrame extends AbstractFrame {
   }
 }
 
+public class ArrayDeque<T> {
+  
+  T[] elements;
+  int size = 0;
+  int startIndex = 0;
+  
+  public ArrayDeque() {
+    elements = (T[]) new Object[32];
+  }
+  
+  public int size() {
+    return size;
+  }
+  
+  public void addLast(T item) {
+    sizeCheck();
+    int index = (startIndex + size) % elements.length;
+    elements[index] = item;
+    size++;
+  }
+  
+  public T get(int i) {
+    return elements[(startIndex + i) % elements.length];
+  }
+  
+  public void removeFirst() {
+    elements[startIndex] = null;
+    startIndex = (startIndex + 1) % elements.length;
+    size--;
+  }
+  
+  private void sizeCheck() {
+    if (size == elements.length) {
+      T[] newElements = (T[]) new Object[elements.length * 2];
+      System.arraycopy(elements, startIndex, newElements, startIndex, elements.length - startIndex);
+      System.arraycopy(elements, 0, newElements, elements.length, startIndex);
+      elements = newElements;
+    }
+  }
+}
+
 public class HistographCanvas extends Canvas {
+  
+  class Peak {
+    int maxTick;
+    float max;
+    int start;
+    int end;
+    
+    public Peak(int maxTick, float max, int start, int end) {
+      this.maxTick = maxTick;
+      this.max = max;
+      this.start = start;
+      this.end = end;
+    }
+  }
   
   static final int FRAMES_PER_SECOND = 60;
   static final float ROLLING_LENGTH_SEC = .5f;
+  static final float PATTERN_MATCHING_LENGTH_SEC = 5;
   static final int ROLLING_LENGTH_DATA_POINTS = (int) (FRAMES_PER_SECOND * ROLLING_LENGTH_SEC);
+  static final int PATTERN_MATCHING_DATA_POINTS = (int) (FRAMES_PER_SECOND * PATTERN_MATCHING_LENGTH_SEC);
+  static final int MAX_BPM = 240;
+  static final int MIN_BPM = 30;
+  static final int MIN_TICKS_BETWEEN_PEAKS = 60 * FRAMES_PER_SECOND / MAX_BPM;
+  static final int MAX_TICKS_BETWEEN_PEAKS = 60 * FRAMES_PER_SECOND / MIN_BPM;
   
   float[] volume;
   boolean[] inPeak;
@@ -336,6 +398,8 @@ public class HistographCanvas extends Canvas {
   float freqFilter;
   int startFFTIndex;
   int endFFTIndex;
+  int currentPeakStartTick;
+  ArrayDeque<Peak> peaks = new ArrayDeque<Peak>();
   
   public HistographCanvas(PApplet parent, int x, int y, int w, int h, int startFFTIndex, int endFFTIndex) {
     super(parent, x, y, w, h);
@@ -383,7 +447,29 @@ public class HistographCanvas extends Canvas {
       scale = (height - 20) / currentVolume;
     }
 
+    boolean wasInPeak = inPeak[(inPeak.length + currentIndex - 1) % inPeak.length];
     inPeak[currentIndex] = canDetectPeaks && currentVolume >= avg + std;
+    if (!wasInPeak && inPeak[currentIndex]) {
+      currentPeakStartTick = ticks;
+    }
+    
+    if (wasInPeak && !inPeak[currentIndex]) {
+      int maxTick = -1;
+      float maxVolume = -1;
+      int endTick = ticks - 1;
+      for (int i = currentPeakStartTick; i <= endTick; i++) {
+        int index = (i - (ticks - currentIndex) + width) % width;
+        if (volume[index] > maxVolume) {
+          maxVolume = volume[index];
+          maxTick = i;
+        }
+      }
+      peaks.addLast(new Peak(maxTick, maxVolume, currentPeakStartTick, endTick));
+    }
+    
+    if (peaks.size() > 0 && peaks.get(0).start < ticks - PATTERN_MATCHING_DATA_POINTS) {
+      peaks.removeFirst();
+    }
 
     for(int i = 0; i < volume.length - 1 && i < currentIndex; i++)
     { 
@@ -411,21 +497,40 @@ public class HistographCanvas extends Canvas {
     stroke(250, 50, 50);
     fill(250, 50, 50);
     
-    int peakStart = -1;
-    for(int i = 0; i < volume.length - 1 && i < currentIndex; i++) {
-      if (peakStart == -1) {
-        if (inPeak[i]) {
-          peakStart = i;
+    int minTick = ticks - currentIndex;
+    for (int i = 0; i < peaks.size(); i++) {
+      Peak peak = peaks.get(i);
+      if (peak.start < minTick) {
+        continue;
+      }
+      rect(peak.start - minTick, height - 10, peak.end - peak.start - 1, 4);
+    }
+    
+    if (inPeak[currentIndex]) {
+      rect(currentPeakStartTick - minTick, height - 10, ticks - currentPeakStartTick - 1, 4);
+    }
+    
+    int[] diffs = new int[peaks.size() * peaks.size()];
+    int in = 0;
+    for (int i = 0; i < peaks.size(); i++) {
+      for (int j = i + 1; j < peaks.size(); j++) {
+        int diff = peaks.get(j).maxTick - peaks.get(i).maxTick;
+        if (diff < MIN_TICKS_BETWEEN_PEAKS) {
+          continue;
         }
-      } else {
-        if (!inPeak[i]) {
-          rect(peakStart, height - 10, i - peakStart - 1, 4);
-          peakStart = -1;
+        if (diff > MAX_TICKS_BETWEEN_PEAKS) {
+          break;
         }
+        diffs[in] = diff;
+        in++;
       }
     }
-    if (peakStart != -1) {
-      rect(peakStart, height - 10, currentIndex - peakStart - 1, 4);
+    
+    Arrays.sort(diffs, 0, in);
+    
+    String out = "";
+    for (int i = 0; i < in; i++) {
+      out += diffs[i] + ", ";
     }
     
     currentIndex++;
@@ -440,6 +545,8 @@ public class HistographCanvas extends Canvas {
     
     fill(70, 70, 70);
     text("" + (int) lowFreq + "-" + (int) hiFreq + " Hz", 10, 20);
+    
+    text(out, 10, 50);
   }
   
   public void reset() {
