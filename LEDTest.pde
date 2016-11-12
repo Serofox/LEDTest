@@ -34,7 +34,7 @@
 import ddf.minim.*; 
 import ddf.minim.analysis.*; 
 import controlP5.*;
-import java.util.Arrays;
+import java.util.*;
 
 Minim minim;
 AudioInput in;
@@ -377,6 +377,34 @@ public class HistographCanvas extends Canvas {
     }
   }
   
+  class Interval {
+    int start;
+    int end;
+    
+    public Interval(int start, int end) {
+      this.start = start;
+      this.end = end;
+    }
+  }
+  
+  class DiffInfo {
+    int diff;
+    Peak startPeak;
+    Peak endPeak;
+    
+    public DiffInfo(int diff, Peak startPeak, Peak endPeak) {
+      this.diff = diff;
+      this.startPeak = startPeak;
+      this.endPeak = endPeak;
+    }
+  }
+  
+  final Comparator<DiffInfo> DIFF_INFO_COMPARATOR = new Comparator<DiffInfo>() {
+    int compare(DiffInfo first, DiffInfo second) {
+      return first.diff - second.diff;
+    }
+  };
+  
   static final int FRAMES_PER_SECOND = 60;
   static final float ROLLING_LENGTH_SEC = .5f;
   static final float PATTERN_MATCHING_LENGTH_SEC = 5;
@@ -510,7 +538,7 @@ public class HistographCanvas extends Canvas {
       rect(currentPeakStartTick - minTick, height - 10, ticks - currentPeakStartTick - 1, 4);
     }
     
-    int[] diffs = new int[peaks.size() * peaks.size()];
+    DiffInfo[] diffs = new DiffInfo[peaks.size() * peaks.size()];
     int in = 0;
     for (int i = 0; i < peaks.size(); i++) {
       for (int j = i + 1; j < peaks.size(); j++) {
@@ -521,20 +549,17 @@ public class HistographCanvas extends Canvas {
         if (diff > MAX_TICKS_BETWEEN_PEAKS) {
           break;
         }
-        diffs[in] = diff;
+        diffs[in] = new DiffInfo(diff, peaks.get(i), peaks.get(j));
         in++;
       }
     }
     
-    Arrays.sort(diffs, 0, in);
+    Arrays.sort(diffs, 0, in, DIFF_INFO_COMPARATOR);
     
     String out = "";
     for (int i = 0; i < in; i++) {
-      out += diffs[i] + ", ";
+      out += diffs[i].diff + ", ";
     }
-    
-    currentIndex++;
-    ticks++;
     
     //
     // Print spectrum range shown
@@ -547,6 +572,99 @@ public class HistographCanvas extends Canvas {
     text("" + (int) lowFreq + "-" + (int) hiFreq + " Hz", 10, 20);
     
     text(out, 10, 50);
+    
+    if (x == 0 && y == 0) {
+      System.out.println(out);
+      List<Interval> beatIntervals = getBeatPattern(diffs, in);
+      String intervals = "";
+      for (Interval interval : beatIntervals) {
+        intervals += "[";
+        for (int i = interval.start; i <= interval.end; i++) {
+          intervals += diffs[i].diff;
+          if (i != interval.end) {
+            intervals += ", ";
+          }
+        }
+        intervals += "], ";
+      }
+      System.out.println(intervals);
+      
+      if (beatIntervals.size() > 0) {
+        Interval minInterval = beatIntervals.get(0);
+        float bestMax = 0;
+        DiffInfo bestDiffInfo = null;
+        for (int i = minInterval.start; i <= minInterval.end; i++) {
+          DiffInfo diff = diffs[i];
+          float max = (diff.startPeak.max + diff.endPeak.max) / 2;
+          if (bestDiffInfo == null || max > bestMax) {
+            bestDiffInfo = diff;
+            bestMax = max;
+          }
+        }
+        
+        stroke(230, 200, 50);
+        int start = bestDiffInfo.startPeak.maxTick;
+        if (start / width < ticks / width) {
+          while (start / width < ticks / width) {
+            start += bestDiffInfo.diff;
+          }
+        } else {
+          stroke(230, 50, 200);
+          line(start % width, 0, start % width, height);
+          line(bestDiffInfo.endPeak.maxTick % width, 0, bestDiffInfo.endPeak.maxTick % width, height);
+          line(start % width, height / 2, bestDiffInfo.endPeak.maxTick % width, height / 2);
+        }
+        stroke(230, 200, 50);
+        start = start % width;
+        for (int i = 0; i < width - start; i += bestDiffInfo.diff) {
+          line(i + start, 0, i + start, height);
+        }
+      }
+    }
+    currentIndex++;
+    ticks++;
+  }
+  
+  List<Interval> getBeatPattern(DiffInfo[] diffs, int length) {
+    int MAX_DIFF_RANGE = 4;
+    int MIN_DIFFS_IN_CLUSTER = 3;
+    
+    ArrayList<Interval> res = new ArrayList<Interval>();
+    if (length == 0) {
+      return res;
+    }
+    
+    boolean done = false;
+    int prevStart = -1, prevEnd = -1;
+    int start = 0, end = 0;
+    
+    while (!done) {
+      while (diffs[end].diff - diffs[start].diff <= MAX_DIFF_RANGE) {
+        end++;
+        if (end == length) {
+          done = true;
+          break;
+        }
+      }
+      end--;
+      if (end - start >= MIN_DIFFS_IN_CLUSTER) {
+        if (start > prevEnd && prevEnd != -1) {
+          res.add(new Interval(prevStart, prevEnd));
+          prevStart = prevEnd = -1;
+        }
+        if (end - start > prevEnd - prevStart) {
+          prevStart = start;
+          prevEnd = end;
+        }
+      }
+      start++;
+      end = start;
+    }
+    if (prevEnd != -1) {
+      res.add(new Interval(prevStart, prevEnd));
+    }
+    
+    return res;
   }
   
   public void reset() {
