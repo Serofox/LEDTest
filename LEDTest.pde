@@ -68,8 +68,8 @@ public void setup()
   
   //signalFrame = new SignalFrame(this, 512, 200, "Audio Signal");
   //rawFFTFrame = new RawFFTFrame(this, 512, 200, "Raw FFT");
-  //histographFrame = new HistographFrame(this, 512, 200, "Histograph");
-  multiHistographFrame = new MultiHistographFrame(this, 257 * 3, 257 * 3, "Histograph");
+  histographFrame = new HistographFrame(this, 256 * 2, 256, "Histograph");
+  //multiHistographFrame = new MultiHistographFrame(this, 257 * 3, 257 * 3, "Histograph");
   //controlFrame = new ControlFrame(this, 170, 200, "Controls");
 }
 
@@ -268,6 +268,10 @@ public abstract class Canvas {
     parent.text(s, x1 + x, y1 + y);
   }
   
+  public void stroke(int a, int b, int c, int d) {
+    parent.stroke(a, b, c, d);
+  }
+  
   public void stroke(int a, int b, int c) {
     parent.stroke(a, b, c);
   }
@@ -278,6 +282,10 @@ public abstract class Canvas {
   
   public void stroke(int a) {
     parent.stroke(a);
+  }
+  
+  public void fill(int a, int b, int c, int d) {
+    parent.fill(a, b, c, d);
   }
   
   public void fill(int a, int b, int c) {
@@ -573,7 +581,8 @@ public class HistographCanvas extends Canvas {
     
     text(out, 10, 50);
     
-    if (x == 0 && y == 0) {
+    //if (Math.abs(x - width) < 5 && y == 0) {
+    if (true) {
       System.out.println(out);
       List<Interval> beatIntervals = getBeatPattern(diffs, in);
       String intervals = "";
@@ -590,15 +599,27 @@ public class HistographCanvas extends Canvas {
       System.out.println(intervals);
       
       if (beatIntervals.size() > 0) {
-        Interval minInterval = beatIntervals.get(0);
-        float bestMax = 0;
+        float bestAverage = -1;
         DiffInfo bestDiffInfo = null;
-        for (int i = minInterval.start; i <= minInterval.end; i++) {
-          DiffInfo diff = diffs[i];
-          float max = (diff.startPeak.max + diff.endPeak.max) / 2;
-          if (bestDiffInfo == null || max > bestMax) {
-            bestDiffInfo = diff;
-            bestMax = max;
+        // Find interval with highest avg peak
+        for (Interval interval : beatIntervals) {
+          float localSum = 0;
+          float bestLocalMax = 0;
+          DiffInfo bestLocalDiffInfo = null;
+          for (int i = interval.start; i <= interval.end; i++) {
+            DiffInfo diff = diffs[i];
+            float max = (diff.startPeak.max + diff.endPeak.max) / 2;
+            localSum += max;
+            if (bestLocalDiffInfo == null || max > bestLocalMax) {
+              bestLocalDiffInfo = diff;
+              bestLocalMax = max;
+            }
+          }
+          // Divide by diffs[interval.start].diff to favor smaller diffs
+          float localAvg = localSum / (interval.end - interval.start + 1) / diffs[interval.start].diff;
+          if (localAvg > bestAverage) {
+            bestDiffInfo = bestLocalDiffInfo;
+            bestAverage = localAvg;
           }
         }
         
@@ -608,16 +629,25 @@ public class HistographCanvas extends Canvas {
           while (start / width < ticks / width) {
             start += bestDiffInfo.diff;
           }
+          start = start % width;
         } else {
-          stroke(230, 50, 200);
+          stroke(230, 50, 200, 60);
           line(start % width, 0, start % width, height);
           line(bestDiffInfo.endPeak.maxTick % width, 0, bestDiffInfo.endPeak.maxTick % width, height);
           line(start % width, height / 2, bestDiffInfo.endPeak.maxTick % width, height / 2);
+          start = start % width + 2 * bestDiffInfo.diff;
         }
-        stroke(230, 200, 50);
-        start = start % width;
+        
+        // Forwards
+        stroke(230, 200, 50, 80);
         for (int i = 0; i < width - start; i += bestDiffInfo.diff) {
           line(i + start, 0, i + start, height);
+        }
+        
+        // Backwards
+        stroke(230, 100, 50, 80);
+        for (int i = 3 * bestDiffInfo.diff; start - i > 0; i += bestDiffInfo.diff) {
+          line(start - i, 0, start - i, height);
         }
       }
     }
@@ -724,7 +754,8 @@ public class HistographFrame extends CanvasFrame {
   }
   
   public void setup() {
-    addCanvas(new HistographCanvas(this, 0, 0, width, height, 0, fft.avgSize()));
+    //addCanvas(new HistographCanvas(this, 0, 0, width, height, 12, fft.avgSize()));
+    addCanvas(new HistographCanvas(this, 0, 0, width, height, 12, 15));
   }
 }
 
